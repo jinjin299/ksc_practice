@@ -10,7 +10,7 @@
 #include <mpi.h>
 
 #define IF if((wrank)==0)
-#define Fprintf fprintf
+#define Fprintf if((wrank)==0)fprintf
 
 typedef struct graphstruct { // A graph in compressed-adjacency-list (CSR) form
 	int nv;            // number of vertices
@@ -19,9 +19,9 @@ typedef struct graphstruct { // A graph in compressed-adjacency-list (CSR) form
 	int *firstnbr;     // index in nbr[] of first neighbor of each vtx
 } graph;
 
-int read_graph_from_file(graph **G, int *startvtx, const char* filename);
-void print_CSR_graph (const graph *G);
-void bfs    (const int s, const graph *G, int *nlevelsp, int **levelsizep);
+int read_graph_from_file(graph **G, int *startvtx, const char* filename, int wrank);
+void print_CSR_graph (const graph *G, int wrank);
+void bfs    (const int s, const graph *G, int *nlevelsp, int **levelsizep, int wrank, int wsize);
 
 static inline double get_time() {
 	struct timeval tv;
@@ -29,7 +29,7 @@ static inline double get_time() {
 	return tv.tv_sec + tv.tv_usec * 1.e-6;
 }
 
-int read_graph_from_file(graph **G, int *startvtx, const char* filename) {
+int read_graph_from_file(graph **G, int *startvtx, const char* filename, int wrank) {
 
 	FILE *fp = fopen (filename, "r");
 	if ( fp == NULL ) {
@@ -49,7 +49,7 @@ int read_graph_from_file(graph **G, int *startvtx, const char* filename) {
 	return 0;
 }
 
-void print_CSR_graph (const graph *G) {
+void print_CSR_graph (const graph *G, int wrank) {
 	int vlimit = 20;
 	int elimit = 50;
 	int e,v;
@@ -78,12 +78,15 @@ void bfs   (const int s,
 	int *llevel = (int *) malloc(G->nv*sizeof(int)); 
 	levelsize = *levelsizep = (int *) malloc(G->nv*sizeof(int)); 
 	queue = (int *) malloc(G->nv*sizeof(int));
+
+    int *gqueue, *bmap, *lqueue;
     IF gqueue = (int *) malloc(G->nv*sizeof(int)*wsize);
 	IF bmap = (int *) calloc(G->nv, sizeof(int));
 	lqueue = (int *) malloc(G->nv*sizeof(int));
     int *num, *sdex, lback, lfront; 
     num = (int *)malloc(wsize);
     sdex = (int *)malloc(wsize);
+    int lvsize;
 
 
 	// initially, queue is empty, all levels are -1
@@ -92,6 +95,7 @@ void bfs   (const int s,
     lback = 0;
     lfront = 0;
 	for (v = 0; v < G->nv; v++) level[v] = -1;
+    memcpy(llevel, level, G->nv * sizeof(int));
 
 	// assign the starting vertex level 0 and put it on the queue to explore
     //
@@ -117,6 +121,7 @@ void bfs   (const int s,
 
         MPI_Scatterv(queue+front, num, sdex, MPI_INT,\
                 lqueue, num[wrank], MPI_INT, 0, MPI_COMM_WORLD);
+        front += v;
         lfront = 0;
         lback = num[wrank];
 
@@ -127,15 +132,19 @@ void bfs   (const int s,
             v = lqueue[lfront++];
 			for (e = G->firstnbr[v]; e < G->firstnbr[v+1]; e++) {
 				w = G->nbr[e];          // w is the current neighbor of v
+                printf("DLOOP, %d : %d\n", wrank, w);
 				if (llevel[w] == -1) {   // w has not already been reached
 					llevel[w] = thislevel+1;
 					levelsize[thislevel+1]++;
 					lqueue[back++] = w;    // put w on queue to explore
 				}
 			}
-		}
+        }
 
         mynum = num[wrank];
+        for (i=0; i< levelsize[thislevel+1]; i++)
+            printf("WRANK %d : %d\n", wrank, lqueue[mynum+i]);
+
         //queue, level size
         MPI_Gather(levelsize+thislevel+1, 1, MPI_INT,\
                 num, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -146,12 +155,12 @@ void bfs   (const int s,
             v += num[i];
         }
 
-        MPI_Gatherv(lqueue+mynum, levelsize[thislevel+1], MPI_INT, \
-                gqueue, num, sdex, MPI_INT, MPI_COMM_WORLD);
-        MPI_Reduce(levelsize+thislevel+1, levelsize+thislevel+1, 1, MPI_INT,\
-            MPI_SUM, 0, MPI_COMM_WORLD);
-
-        
+        MPI_Gatherv(lqueue+mynum, levelsize[thislevel+1], MPI_INT, gqueue, num, sdex, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Allreduce(levelsize+thislevel+1, &lvsize, 1, MPI_INT,\
+            MPI_SUM, MPI_COMM_WORLD);
+        levelsize[thislevel+1] = lvsize;
+        IF printf("LEVEL %d : %d\n", thislevel+1, lvsize);
+         
         //Remove Overlap
         //
         IF
@@ -165,7 +174,7 @@ void bfs   (const int s,
             }
         }
         //level
-        MPI_Allreduce(level, llevel, G->nv, MPI_INT, MP_MAX, MPI_COMM_WORLD);
+        MPI_Allreduce(llevel, level, G->nv, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
         memcpy(level, llevel, G->nv * sizeof(int));
         // ** Fuse the data in the levels
 		thislevel = thislevel+1;
@@ -194,7 +203,7 @@ int main (int argc, char* argv[]) {
 	if (argc == 2) {
 		filename = argv[1];
 	} else {
-		Fprintf(stderr, "usage: bfs <filename>\n");
+		fprintf(stderr, "usage: bfs <filename>\n");
 		exit(1);
 	}
 //	starttime = get_time();
@@ -203,9 +212,9 @@ int main (int argc, char* argv[]) {
     MPI_Comm_size(MPI_COMM_WORLD, &wsize);
 
 	starttime = MPI_Wtime();
-	if (read_graph_from_file(&G, &startvtx, filename)) return -1;
+	if (read_graph_from_file(&G, &startvtx, filename, wrank)) return -1;
 	Fprintf(stdout, "Elapsed Time to read and construct graph: %f\n", get_time() - starttime);
-	print_CSR_graph (G);
+	print_CSR_graph (G, wrank);
 
 	Fprintf(stdout, "Starting vertex for BFS is %d.\n\n",startvtx);
 	starttime = get_time();
@@ -213,16 +222,17 @@ int main (int argc, char* argv[]) {
 	bfs (startvtx, G, &nlevels, &levelsize, wrank, wsize);
     elapsedtime = MPI_Wtime() - starttime;
 	//elapsedtime = get_time() -starttime;
-
-	reached = 0;
-	for (i = 0; i < nlevels; i++) reached += levelsize[i];
-	Fprintf(stdout, "Breadth-first search from vertex %d reached %d levels and %d vertices.\n",
-		startvtx, nlevels, reached);
-	for (i = 0; i < nlevels; i++) printf("level %d vertices: %d\n", i, levelsize[i]);
-	Fprintf(stdout, "\n");
-	Fprintf(stdout, "GTEPs: %f\n", (reached/elapsedtime)/1000000);
-	Fprintf(stdout, "Elapsed Time: %f\n", elapsedtime);
-
+    if(wrank==0)
+    {
+        reached = 0;
+        for (i = 0; i < nlevels; i++) reached += levelsize[i];
+        fprintf(stdout, "Breadth-first search from vertex %d reached %d levels and %d vertices.\n",
+            startvtx, nlevels, reached);
+        for (i = 0; i < nlevels; i++) fprintf(stdout, "level %d vertices: %d\n", i, levelsize[i]);
+        fprintf(stdout, "\n");
+        fprintf(stdout, "GTEPs: %f\n", (reached/elapsedtime)/1000000);
+        fprintf(stdout, "Elapsed Time: %f\n", elapsedtime);
+    }
 	free(levelsize);
 	free(G);
     MPI_Finalize();
