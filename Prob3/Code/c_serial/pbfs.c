@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <mpi.h>
 
 typedef struct graphstruct { // A graph in compressed-adjacency-list (CSR) form
 	int nv;            // number of vertices
@@ -123,7 +124,7 @@ int main (int argc, char* argv[]) {
 		exit(1);
 	}
 //	starttime = get_time();
-    MPI_Init();
+    MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &wrank);
     MPI_Comm_size(MPI_COMM_WORLD, &wsize);
 
