@@ -1,0 +1,60 @@
+  1 #include <stdio.h>                                                                                | 44         plevel += 1;
+  2 #include "multigrid.h"                                                                            | 45     }
+  3 #include <mpi.h>                                                                                  | 46
+  4 #define URF(I,J) uf[(I)*(2*nc)+(J)]                                                               | 47     numgrid_x[nlevel-1] = ngrid/wsize;
+  5 #define URC(I,J) uc[(I)*(nc)+(J)]                                                                 | 48     numgrid_y[nlevel-1] = ngrid;
+  6 #define UIC(I,J) ucwithghost[(I)*(nc+2)+(J)]                                                      | 49     gridsize[nlevel-1] = length_x/(double)ngrid;
+  7 #define UIF(I,J) uf[(I)*(nf)+(J)]                                                                 | 50     matrixDOF[nlevel-1] = numgrid_x[nlevel-1]*numgrid_y[nlevel-1];
+  8                                                                                                   | 51
+  9 void restriction(double *uf, double *uc, int nc, int ny)                                          | 52     for(i=nlevel-1; i>=plevel+1; i--)
+ 10 {                                                                                                 | 53     {
+ 11     int ic, jc;                                                                                   | 54         numgrid_x[i-1] = numgrid_x[i]/2;
+ 12                                                                                                   | 55         numgrid_y[i-1] = numgrid_y[i]/2;
+ 13     for (ic=0; ic<nc; ic++)                                                                       | 56         gridsize[i-1] = length_x/numgrid_x[i-1];
+ 14     {                                                                                             | 57         matrixDOF[i-1] = numgrid_x[i-1]*numgrid_y[i-1];
+ 15     for (jc=0; jc<ny; jc++)                                                                       | 58     }
+ 16     {                                                                                             | 59
+ 17         URC(ic,jc) = 1.0/4.0*( \                                                                  | 60     numgrid_x[plevel] *= wsize;
+ 18             URF(2*ic,2*jc)+URF(2*ic+1,2*jc) \                                                     | 61     for(i=plevel; i>=1; i--)
+ 19             +URF(2*ic,2*jc+1)+URF(2*ic+1,2*jc+1));                                                | 62     {
+ 20     }                                                                                             | 63         numgrid_x[i-1] = numgrid_x[i]/2;
+ 21     }                                                                                             | 64         numgrid_y[i-1] = numgrid_y[i]/2;
+ 22 }                                                                                                 | 65         gridsize[i-1] = length_x/numgrid_x[i-1];
+ 23                                                                                                   | 66         matrixDOF[i-1] = numgrid_x[i-1]*numgrid_y[i-1];
+ 24 void interpolation(double *uc, double *uf, int nf, int nfy, int wrank, int wsize)                 | 67     }
+ 25 {                                                                                                 | 68     numgrid_x[plevel] /= wsize;
+ 26     int ic,jc,nc,ny,count=0;                                                                      | 69
+ 27     double *ucwithghost;                                                                          | 70     if (wrank == 0)
+ 28     int i,j;                                                                                      | 71         printf("[Multigrid] Geometry and matrix size initialized.\n");
+ 29     nc = nf>>1;                                                                                   | 72
+ 30     ny = nfy>>1;                                                                                  | 73     for(i=0; i<nlevel; i++)
+ 31     ucwithghost = (double*)malloc((nc+2)*(ny+2)*sizeof(double));                                  | 74     {
+ 32                                                                                                   | 75         if ((i<plevel)&&(wrank==0))
+ 33     for (i=1; i<nc+1; i++)                                                                        | 76         {
+ 34     {                                                                                             | 77             rhs[i] = (double*)malloc(matrixDOF[i]*sizeof(double));
+ 35     for (j=1; j<ny+1; j++)                                                                        | 78             solution[i] = (double*)malloc(matrixDOF[i]*sizeof(double));
+ 36     {                                                                                             | 79         }
+ 37         UIC(i,j) = uc[count];                                                                     | 80         else if ((i==plevel)&&(wrank==0))
+ 38         count++;                                                                                  | 81         {
+ 39     }                                                                                             | 82             rhs[i] = (double*)malloc(wsize * matrixDOF[i] * sizeof(double));
+ 40     }                                                                                             | 83             solution[i] = (double*)malloc(wsize * matrixDOF[i] * sizeof(double));
+ 41                                                                                                   | 84         }
+ 42     for (j=1; j<ny+1; j++)                                                                        | 85         else if ((i==(nlevel-1)-5)&&(wrank==0))
+ 43     {                                                                                             | 86         {
+ 44     UIC(0,j) = -UIC(1,j);                                                                         | 87             rhs[i] = (double*)malloc(matrixDOF[i]*sizeof(double));
+ 45     UIC(nc+1,j) = -UIC(nc,j);                                                                     | 88             solution[i] = (double*)malloc(wsize * matrixDOF[i]*sizeof(double));
+ 46     }                                                                                             | 89         }
+ 47     if (nf!=nfy)                                                                                  | 90         else if ((i>plevel)&&(wrank==0))
+ 48     {                                                                                             | 91         {
+ 49         if (wrank == 0)                                                                           | 92             rhs[i] = (double*)malloc(matrixDOF[i]*sizeof(double));
+ 50         {                                                                                         | 93             solution[i] = (double*)malloc(matrixDOF[i]*sizeof(double));
+ 51             //First Line                                                                          | 94         }
+ 52             for (i=1; i<nc+1; i++)                                                                | 95         else if (i>=plevel)
+ 53             {                                                                                     | 96         {
+ 54             UIC(i,0) = -UIC(i,1);                                                                 | 97             rhs[i] = (double*)malloc(matrixDOF[i]*sizeof(double));
+ 55             //UIC(i,nc+1) = -UIC(i,nc);                                                           | 98             solution[i] = (double*)malloc(matrixDOF[i]*sizeof(double));
+ 56             }                                                                                     | 99         }
+ 57             UIC(0,0) = -UIC(1,1);                                                                 |100     }
+ 58             UIC(0,nc+1) = -UIC(1,nc);                                                             |101
+multigrid.c                                                                         3,1            Top main.c                                                                             44,9           21%
+
