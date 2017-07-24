@@ -151,6 +151,7 @@ void bfs   (const int s,
     num = (int *)malloc(wsize);
     sdex = (int *)malloc(wsize);
     int lvsize;
+    double time[10];
 
 
 	// initially, queue is empty, all levels are -1
@@ -168,6 +169,10 @@ void bfs   (const int s,
 	levelsize[0] = 1;
 	queue[back++] = s;
     int mynum; 
+    for (i=0; i<10;i++)
+        time[i]=0;
+    time[0] = MPI_Wtime();
+
 	// loop over levels, then over vertices at this level, then over neighbors
 	while (levelsize[thislevel] > 0) {
 		levelsize[thislevel+1] = 0;
@@ -194,6 +199,8 @@ void bfs   (const int s,
         // ** local queue - 
         // ** level - Update information of other
         // ** levelsize - sum queue
+        time[1] += MPI_Wtime() - time[0];
+        time[0] = MPI_Wtime();
         for (i = 0; i < num[wrank]; i++) {
             v = lqueue[lfront++];
 			for (e = G->firstnbr[v]; e < G->firstnbr[v+1]; e++) {
@@ -207,6 +214,8 @@ void bfs   (const int s,
         }
 
 
+        time[2] += MPI_Wtime() - time[0];
+        time[0] = MPI_Wtime();
         mynum = num[wrank];
 
         //queue, level size
@@ -223,6 +232,8 @@ void bfs   (const int s,
         MPI_Allreduce(levelsize+thislevel+1, &lvsize, 1, MPI_INT,\
             MPI_SUM, MPI_COMM_WORLD);
         levelsize[thislevel+1] = lvsize;
+        time[3] += MPI_Wtime() - time[0];
+        time[0] = MPI_Wtime();
          
         //Remove Overlap
         //
@@ -240,13 +251,25 @@ void bfs   (const int s,
             }
         }
         MPI_Bcast(levelsize+thislevel+1, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        time[4] += MPI_Wtime() - time[0];
+        time[0] = MPI_Wtime();
 
         //level
         MPI_Allreduce(llevel, level, G->nv, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        time[5] += MPI_Wtime() - time[0];
+        time[0] = MPI_Wtime();
         memcpy(level, llevel, G->nv * sizeof(int));
         // ** Fuse the data in the levels
 		thislevel = thislevel+1;
+        time[6] += MPI_Wtime() - time[0];
+        time[0] = MPI_Wtime();
 	}
+    IF
+    {
+        for(i=1;i<7;i++)
+            printf("Elapsed %f\n", time[i]);
+    }
+
 	*nlevelsp = thislevel;
 	free(queue);
     // Added
