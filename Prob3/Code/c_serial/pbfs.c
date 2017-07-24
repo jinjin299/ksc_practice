@@ -140,7 +140,6 @@ void bfs   (const int s,
 	int i, v, w, e; 
 	queue = (int *) malloc(G->nv*sizeof(int));
 	int *level = (int *) malloc(G->nv*sizeof(int)); 
-	int *llevel = (int *) malloc(G->nv*sizeof(int)); 
 	levelsize = *levelsizep = (int *) malloc(G->nv*sizeof(int)); 
 
     int *gqueue, *bmap, *lqueue;
@@ -160,7 +159,6 @@ void bfs   (const int s,
     lback = 0;
     lfront = 0;
 	for (v = 0; v < G->nv; v++) level[v] = -1;
-    memcpy(llevel, level, G->nv*sizeof(int));
 
 	// assign the starting vertex level 0 and put it on the queue to explore
     //
@@ -205,14 +203,12 @@ void bfs   (const int s,
             v = lqueue[lfront++];
 			for (e = G->firstnbr[v]; e < G->firstnbr[v+1]; e++) {
 				w = G->nbr[e];          // w is the current neighbor of v
-				if (llevel[w] == -1) {   // w has not already been reached
-					llevel[w] = thislevel+1;
+				if (level[w] == -1) {   // w has not already been reached
 					levelsize[thislevel+1]++;
 					lqueue[lback++] = w;    // put w on queue to explore
 				}
 			}
         }
-
 
         time[2] += MPI_Wtime() - time[0];
         time[0] = MPI_Wtime();
@@ -221,17 +217,19 @@ void bfs   (const int s,
         //queue, level size
         MPI_Gather(levelsize+thislevel+1, 1, MPI_INT,\
                 num, 1, MPI_INT, 0, MPI_COMM_WORLD);
-        v = 0;
-        for(i=0; i<wsize; i++)
+        IF
         {
-            sdex[i] = v;
-            v += num[i];
+            v = 0;
+            for(i=0; i<wsize; i++)
+            {
+                sdex[i] = v;
+                v += num[i];
+            }
         }
         
         MPI_Gatherv(lqueue+mynum, levelsize[thislevel+1], MPI_INT, gqueue, num, sdex, MPI_INT, 0, MPI_COMM_WORLD);
-        MPI_Allreduce(levelsize+thislevel+1, &lvsize, 1, MPI_INT,\
-            MPI_SUM, MPI_COMM_WORLD);
-        levelsize[thislevel+1] = lvsize;
+        //MPI_Reduce(levelsize+thislevel+1, &lvsize, 1, MPI_INT,\
+            MPI_SUM, 0, MPI_COMM_WORLD);
         time[3] += MPI_Wtime() - time[0];
         time[0] = MPI_Wtime();
          
@@ -239,6 +237,7 @@ void bfs   (const int s,
         //
         IF
         {
+            lvsize = v;
             for(i=0; i<v ;i++)
             {
                 if(bmap[gqueue[i]]==0)
@@ -247,22 +246,26 @@ void bfs   (const int s,
                     bmap[gqueue[i]]++;
                 }
                 else
-                    levelsize[thislevel+1]--;
+                    lvsize--;
             }
+            levelsize[thislevel+1] = lvsize;
         }
         MPI_Bcast(levelsize+thislevel+1, 1, MPI_INT, 0, MPI_COMM_WORLD);
-        time[4] += MPI_Wtime() - time[0];
+        time[4] += MPI_Wtime() - time[0]; //0.6s
         time[0] = MPI_Wtime();
 
         //level
-        MPI_Allreduce(llevel, level, G->nv, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-        time[5] += MPI_Wtime() - time[0];
+        MPI_Bcast(&back, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&front, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(queue+front, back-front, MPI_INT, 0, MPI_COMM_WORLD);
+        time[5] += MPI_Wtime() - time[0]; // 0.35s
         time[0] = MPI_Wtime();
-        memcpy(level, llevel, G->nv * sizeof(int));
+        for(i=front; i<back; i++)
+            level[queue[i]] = thislevel + 1;
+        time[6] += MPI_Wtime() - time[0]; // 0.35s
+        time[0] = MPI_Wtime();
         // ** Fuse the data in the levels
 		thislevel = thislevel+1;
-        time[6] += MPI_Wtime() - time[0];
-        time[0] = MPI_Wtime();
 	}
     IF
     {
@@ -279,7 +282,6 @@ void bfs   (const int s,
     free(num);
     free(sdex);
 	free(level);
-	free(llevel);
 }
 
 int main (int argc, char* argv[]) {
