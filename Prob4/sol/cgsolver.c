@@ -1,0 +1,107 @@
+#include "cgsolver.h"
+#include <mpi.h>
+void cgsolver(int size, double *matrix, double *rhs, double *solution, int maxiteration, double tolerance, int wrank, int wsize)
+{
+    int ii, jj, kk;
+    double alpha=0.0, beta=0.0, temp1, temp2, res0tol=0.0;
+    double *p, *Ax, *Ap, *res;
+
+    res = (double*) malloc(size*sizeof(double));
+    p   = (double*) malloc(size*sizeof(double));
+    Ax  = (double*) malloc(size*sizeof(double));
+    Ap  = (double*) malloc(size*sizeof(double));
+    int rsize = size/wsize;
+    double *TAx, *TAp;
+
+    TAx = (double*) malloc(rsize*sizeof(double));
+    TAp = (double*) malloc(rsize*sizeof(double));
+
+    int sdex, edex;
+    sdex = rsize * wrank;
+    edex = rsize * (wrank+1);
+
+    multiply(size, matrix, solution, TAx, sdex, rsize);
+    MPI_Allgather(TAx, rsize, MPI_DOUBLE, Ax, rsize, MPI_DOUBLE, MPI_COMM_WORLD);
+
+    for (ii=0; ii<size; ii++)
+    {
+        res[ii] = rhs[ii]-Ax[ii];
+        p[ii]   = res[ii];
+
+        //printf("In CG, %f %f\n", rhs[ii], res[ii]);
+    }
+
+    res0tol = innerproduct(res, res, size);
+
+    //printf("res0tol=%f\n", res0tol);
+    //exit(1);
+
+    Printf("[CG] Conjugate gradient is started.\n");
+
+    for (ii=0; ii<maxiteration; ii++)
+    {
+        if ((ii%20==0)&&(ii!=0))
+            Printf("[CG] mse %e with a tolerance criteria\
+                    of %e at %5d iterations.\n", sqrt(temp2/res0tol), tolerance, ii);
+
+        temp1 = innerproduct(res, res, size);
+        multiply(size, matrix, p, TAp, sdex, rsize);
+        MPI_Allgather(TAp, rsize, MPI_DOUBLE, Ap, rsize, MPI_DOUBLE, MPI_COMM_WORLD);
+        //multiply(size, matrix, p, Ap);
+        temp2 = innerproduct(Ap, p, size);
+
+        alpha=temp1/temp2;
+
+        for (jj=0; jj<size; jj++)
+        {
+            solution[jj] = solution[jj] + alpha*p[jj];
+            res[jj] = res[jj] - alpha*Ap[jj];
+        }
+
+        temp2 = innerproduct(res, res, size);
+
+        if (sqrt(temp2/res0tol) < tolerance)
+            break;
+
+        beta = temp2/temp1;
+
+        for (jj=0; jj<size; jj++)
+            p[jj]= res[jj] + beta*p[jj];
+
+    }
+
+    Printf("[CG] Finished with total iteration = %d, mse = %e.\n", (ii+1), sqrt(temp2/res0tol));
+
+    free(res);
+    free(p);
+    free(Ax);
+    free(Ap);
+    free(TAx);
+    free(TAp);
+}
+
+double innerproduct(double *x, double *y, int size)
+{
+    int ii;
+    double result;
+
+    result = 0.0;
+
+    for(ii=0; ii<size; ii++)
+        result += x[ii]*y[ii];
+
+    return result;
+}
+
+void multiply(int size, double *matrix, double *x, double *y, int sdex, int rsize)
+{
+    int ii, jj;
+
+    for (ii=0; ii<rsize; ii++)       // initialize y
+        y[ii]=0.0;
+
+    for (ii=0; ii<rsize; ii++)
+        for (jj=0; jj<size; jj++)
+            y[ii] += matrix[(sdex+ii)*size+jj] * x[jj];
+}
+

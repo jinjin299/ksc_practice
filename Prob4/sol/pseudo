@@ -1,0 +1,10 @@
+inner(res,res)
+A p -> Ap
+a = inne(res, res)/inner(Ap, p)
+
+solution <- p
+res <- Ap
+
+inner(res, res)
+
+p <- res
