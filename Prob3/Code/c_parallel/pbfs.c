@@ -210,6 +210,7 @@ void pbfs (const int s, const graph *G, const int nproc, const int myrank,
  
 	// loop over levels, then over vertices at this level, then over neighbors
 	while(1) {
+        printf("thislevel %d\n", thislevel);
 		levelsize[thislevel+1] = 0;
 		memset(sendcnt, 0, nproc*sizeof(int));
 		num_ranks_done = 1;

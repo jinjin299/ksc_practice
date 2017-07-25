@@ -8,19 +8,18 @@ void cgsolver(int size, double *matrix, double *rhs, double *solution, int maxit
     double alpha=0.0, beta=0.0, temp1, temp2, res0tol=0.0;
     double *p, *Ax, *Ap, *res;
 
-    int cnum=size/wsize;
-    res = (double*) malloc(cnum*sizeof(double));
-    p   = (double*) malloc(cnum*sizeof(double));
-    Ax  = (double*) malloc(cnum*sizeof(double));
-    Ap  = (double*) malloc(cnum*sizeof(double));
+    int rnum=size/wsize;
+    res = (double*) malloc(rnum*sizeof(double));
+    p   = (double*) malloc(rnum*sizeof(double));
 
-    rest = (double*) malloc(cnum*sizeof(double));
-    pt   = (double*) malloc(cnum*sizeof(double));
-    Axt  = (double*) malloc(cnum*sizeof(double));
-    Apt  = (double*) malloc(cnum*sizeof(double));
+    rest = (double*) malloc(rnum*sizeof(double));
+    pt   = (double*) malloc(rnum*sizeof(double));
+    Ax  = (double*) malloc(rnum*sizeof(double));
+    Ap  = (double*) malloc(rnum*sizeof(double));
+    Axt  = (double*) malloc(rnum*sizeof(double));
+    Apt  = (double*) malloc(rnum*sizeof(double));
     
-    multiply(cnum, size, matrix, solution, Axt);
-    MPI_Allreduce(Axt, Ax, size
+    multiply(pnum, size, matrix, solution, Ax);
 
     for (ii=0; ii<size; ii++)
     {
@@ -101,7 +100,7 @@ double innerproduct(double *x, double *y, int size)
     return result;
 }
 
-void multiply(int cnum, int size, double *matrix, double *x, double *y)
+void multiply(int pnum, int size, double *matrix, double *x, double *y)
 {
     int ii, jj;
 
@@ -109,7 +108,7 @@ void multiply(int cnum, int size, double *matrix, double *x, double *y)
         y[ii]=0.0;
 
     for (ii=0; ii<size; ii++)
-        for (jj=0; jj<cnum; jj++)
+        for (jj=0; jj<pnum; jj++)
             y[ii] += matrix[ii*size+jj] * x[jj];
 }
 
